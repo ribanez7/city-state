@@ -7,7 +7,7 @@ module CS
   MAXMIND_DB_FN = File.join(FILES_FOLDER, "GeoLite2-City-Locations-en.csv")
   COUNTRIES_FN = File.join(FILES_FOLDER, "countries.yml")
 
-  @countries, @states, @cities = [{}, {}, {}]
+  @countries, @states, @regions, @cities = [{}, {}, {}, {}]
   @current_country = nil # :US, :BR, :GB, :JP, ...
 
   def self.update_maxmind
@@ -36,17 +36,19 @@ module CS
     Dir[File.join(FILES_FOLDER, "states.*")].each do |state_fn|
       self.install(state_fn.split(".").last.upcase.to_sym) # reinstall country
     end
-    @countries, @states, @cities = [{}, {}, {}] # invalidades cache
+    @countries, @states, @regions, @cities = [{}, {}, {}, {}] # invalidades cache
     File.delete COUNTRIES_FN # force countries.yml to be generated at next call of CS.countries
     true
   end
 
-  # constants: CVS position
+  # constants: CSV position
   ID = 0
   COUNTRY = 4
   COUNTRY_LONG = 5
   STATE = 6
   STATE_LONG = 7
+  REGION = 8
+  REGION_LONG = 9
   CITY = 10
 
   def self.install(country)
@@ -63,8 +65,9 @@ module CS
     states_replace_inv = states_replace.invert # invert key with value, to ease the search
 
     # read CSV line by line
-    cities = {}
-    states = {}
+    cities  = {}
+    regions = {}
+    states  = {}
     File.foreach(MAXMIND_DB_FN) do |line|
       rec = line.split(",")
       next if rec[COUNTRY] != country
@@ -79,8 +82,9 @@ module CS
 
       # normalize
       rec[STATE] = rec[STATE].to_sym
-      rec[CITY].gsub!(/\"/, "") # sometimes names come with a "\" char
-      rec[STATE_LONG].gsub!(/\"/, "") # sometimes names come with a "\" char
+      rec[CITY].gsub!(/\"/, "")        # sometimes names come with a \" char
+      rec[REGION_LONG].gsub!(/\"/, "")
+      rec[STATE_LONG].gsub!(/\"/, "")
 
       # cities list: {TX: ["Texas City", "Another", "Another 2"]}
       cities.merge!({rec[STATE] => []}) if ! states.has_key?(rec[STATE])
@@ -94,16 +98,19 @@ module CS
     end
 
     # sort
-    cities = Hash[cities.sort]
-    states = Hash[states.sort]
+    cities  = Hash[cities.sort]
+    regions = Hash[regions.sort]
+    states  = Hash[states.sort]
     cities.each { |k, v| cities[k].sort! }
 
     # save to states.us and cities.us
-    states_fn = File.join(FILES_FOLDER, "states.#{country.downcase}")
-    cities_fn = File.join(FILES_FOLDER, "cities.#{country.downcase}")
-    File.open(states_fn, "w") { |f| f.write states.to_yaml }
-    File.open(cities_fn, "w") { |f| f.write cities.to_yaml }
-    File.chmod(0666, states_fn, cities_fn) # force permissions to rw_rw_rw_ (issue #3)
+    states_fn  = File.join(FILES_FOLDER, "states.#{country.downcase}")
+    regions_fn = File.join(FILES_FOLDER, "regions.#{country.downcase}")
+    cities_fn  = File.join(FILES_FOLDER, "cities.#{country.downcase}")
+    File.open(states_fn, "w")  { |f| f.write states.to_yaml }
+    File.open(regions_fn, "w") { |f| f.write regions.to_yaml }
+    File.open(cities_fn, "w")  { |f| f.write cities.to_yaml }
+    File.chmod(0666, states_fn, regions_fn, cities_fn) # force permissions to rw_rw_rw_ (issue #3)
     true
   end
 
@@ -131,7 +138,7 @@ module CS
     @current_country = country.to_s.upcase.to_sym
   end
 
-  def self.cities(state, country = nil)
+  def self.cities(state, country = nil, region = nil)
     self.current_country = country if country.present? # set as current_country
     country = self.current_country
 
@@ -142,7 +149,11 @@ module CS
       @cities[country] = YAML::load_file(cities_fn).symbolize_keys
     end
 
-    @cities[country][state.to_s.upcase.to_sym] || []
+    if region.nil?
+      return @cities[country][state.to_s.upcase.to_sym] || []
+    else
+      return @cities[country][state.to_s.upcase.to_sym][region.to_s.upcase.to_sym] || []
+    end
   end
 
   def self.states(country)
@@ -189,9 +200,10 @@ module CS
 
   # get is a method to simplify the use of city-state
   # get = countries, get(country) = states(country), get(country, state) = cities(state, country)
-  def self.get(country = nil, state = nil)
+  def self.get(country = nil, state = nil, region = nil)
     return self.countries if country.nil?
     return self.states(country) if state.nil?
-    return self.cities(state, country)
+    # return self.cities(state, country, region) if region.nil?
+    return self.cities(state, country, region)
   end
 end
